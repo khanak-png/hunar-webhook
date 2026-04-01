@@ -1,0 +1,12 @@
+{
+  "name": "hunar-webhook-receiver",
+  "version": "1.0.0",
+  "description": "Webhook receiver: Hunar AI calls → n8n → WATI WhatsApp",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
