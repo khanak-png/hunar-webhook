@@ -3,7 +3,7 @@ const app = express();
 app.use(express.json());
 
 // ✅ Your n8n webhook URL
-const N8N_WEBHOOK_URL = "https://khanakarodia.app.n8n.cloud/webhook-test/BPO_API";
+const N8N_WEBHOOK_URL = "https://khanakarodia.app.n8n.cloud/webhook/BPO_API";
 
 // Store last 100 calls in memory
 const callLog = [];
