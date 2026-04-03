@@ -322,7 +322,8 @@ app.get("/", (req, res) => {
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     el.classList.add('active');
-    if (id === 'campaign') loadAgents();
+    if (id === "campaign") { clearTimeout(refreshTimer); loadAgents(); }
+    if (id === "dashboard") { refreshTimer = setTimeout(() => location.reload(), 10000); }
   }
 
   async function loadAgents() {
@@ -400,13 +401,11 @@ app.get("/", (req, res) => {
     setTimeout(() => box.innerHTML = '', 8000);
   }
 
-  if (!window.location.hash || window.location.hash === '#dashboard') {
-    setTimeout(() => location.reload(), 10000);
-  }
+  window.refreshTimer = setTimeout(() => location.reload(), 10000);
 </script>
 </body>
 </html>`);
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Running on port ${PORT} | API key set: ${!!HUNAR_API_KEY}`));
+app.listen(PORT, () => console.log(`🚀 Running on port ${PORT} | API key set: ${!!hunar_va_live_sk_qAqRT3I9aggsuLNFgf-VdVXI3kLobALJmAfQpb-yWIi_uOLZbkC7IQ}`));
