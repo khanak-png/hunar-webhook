@@ -45,7 +45,7 @@ app.post("/webhook", async (req, res) => {
 app.get("/api/agents", async (req, res) => {
   try {
     const r = await fetch(`${HUNAR_BASE_URL}/agents/`, {
-      headers: { "X-API-Key": hunar_va_live_sk_qAqRT3I9aggsuLNFgf-VdVXI3kLobALJmAfQpb-yWIi_uOLZbkC7IQ, "Content-Type": "application/json" }
+      headers: { "X-API-Key": HUNAR_API_KEY, "Content-Type": "application/json" }
     });
     const data = await r.json();
     console.log("Hunar agents response:", JSON.stringify(data));
@@ -70,12 +70,9 @@ app.post("/api/campaigns", upload.single("file"), async (req, res) => {
       remove_invalid_rows: true,
       remove_duplicate_phone_numbers: true,
       callback_config: {
-        call_result_callback_url:  
-https://khanakarodia.app.n8n.cloud/webhook/BPO_API,
-        call_summary_callback_url: 
-https://khanakarodia.app.n8n.cloud/webhook/BPO_API,
-        call_status_callback_url:  
-https://khanakarodia.app.n8n.cloud/webhook/BPO_API
+        call_result_callback_url:  N8N_WEBHOOK_URL,
+        call_summary_callback_url: N8N_WEBHOOK_URL,
+        call_status_callback_url:  N8N_WEBHOOK_URL
       }
     };
 
@@ -90,7 +87,7 @@ https://khanakarodia.app.n8n.cloud/webhook/BPO_API
 
     const r = await fetch(`${HUNAR_BASE_URL}/campaigns/`, {
       method:  "POST",
-      headers: { "X-API-Key": hunar_va_live_sk_qAqRT3I9aggsuLNFgf-VdVXI3kLobALJmAfQpb-yWIi_uOLZbkC7IQ, ...form.getHeaders() },
+      headers: { "X-API-Key": HUNAR_API_KEY, ...form.getHeaders() },
       body:    form
     });
 
@@ -111,7 +108,7 @@ https://khanakarodia.app.n8n.cloud/webhook/BPO_API
 app.get("/health", (req, res) => res.json({
   status: "ok",
   calls: callLog.length,
-  api_key_set: !!hunar_va_live_sk_qAqRT3I9aggsuLNFgf-VdVXI3kLobALJmAfQpb-yWIi_uOLZbkC7IQ
+  api_key_set: !!HUNAR_API_KEY
 }));
 
 // ─────────────────────────────────────────
@@ -247,8 +244,7 @@ app.get("/", (req, res) => {
   <p class="sub"><span class="dot"></span>Auto-refreshes every 10 seconds</p>
 
   <div class="webhook-box">
-    n8n receives directly from Hunar at: <strong>${
-https://khanakarodia.app.n8n.cloud/webhook/BPO_API}</strong>
+    n8n receives directly from Hunar at: <strong>${N8N_WEBHOOK_URL}</strong>
   </div>
 
   <div class="metrics">
@@ -309,8 +305,7 @@ https://khanakarodia.app.n8n.cloud/webhook/BPO_API}</strong>
 
     <div style="font-size:12px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:20px">
       ✅ Call results will go directly to n8n:<br>
-      <strong style="font-family:monospace">${
-https://khanakarodia.app.n8n.cloud/webhook/BPO_API}</strong><br>
+      <strong style="font-family:monospace">${N8N_WEBHOOK_URL}</strong><br>
       WhatsApp messages will be sent to the caller's number when has_referral = Yes & whatsapp_consent = Yes
     </div>
 
@@ -413,4 +408,4 @@ https://khanakarodia.app.n8n.cloud/webhook/BPO_API}</strong><br>
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Running on port ${PORT} | API key set: ${!!hunar_va_live_sk_qAqRT3I9aggsuLNFgf-VdVXI3kLobALJmAfQpb-yWIi_uOLZbkC7IQ}`));
+app.listen(PORT, () => console.log(`🚀 Running on port ${PORT} | API key set: ${!!HUNAR_API_KEY}`));
