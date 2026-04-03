@@ -1,6 +1,6 @@
-const express = require("express");
-const multer  = require("multer");
-const fetch   = require("node-fetch");
+const express  = require("express");
+const multer   = require("multer");
+const fetch    = require("node-fetch");
 const FormData = require("form-data");
 
 const app    = express();
@@ -10,23 +10,32 @@ app.use(express.json());
 // ─────────────────────────────────────────
 // CONFIG
 // ─────────────────────────────────────────
-const HUNAR_API_KEY   = process.env.HUNAR_API_KEY || "YOUR_HUNAR_API_KEY";
+const HUNAR_API_KEY   = process.env.HUNAR_API_KEY || "";
 const HUNAR_BASE_URL  = "https://api.voice.hunar.ai/external/v1";
 const N8N_WEBHOOK_URL = "https://khanakarodia.app.n8n.cloud/webhook/BPO_API";
 
-// In-memory call log
+// In-memory call log (last 100)
 const callLog = [];
 
 // ─────────────────────────────────────────
-// POST /webhook  ← n8n receives directly from Hunar now
-// (kept as fallback / monitoring)
+// POST /webhook  ← Hunar sends call results here
 // ─────────────────────────────────────────
 app.post("/webhook", async (req, res) => {
-  const payload   = req.body;
+  const payload    = req.body;
   const receivedAt = new Date().toISOString();
-  callLog.unshift({ ...payload, receivedAt });
+
+  // Attach the caller's number so n8n can send WhatsApp
+  // Hunar sends it as "to_number" in the webhook payload
+  const enriched = {
+    ...payload,
+    receivedAt,
+    whatsapp_target: payload.to_number || payload.mobile_number || "NOT_CAPTURED"
+  };
+
+  callLog.unshift(enriched);
   if (callLog.length > 100) callLog.pop();
-  console.log("📞 Webhook received:", JSON.stringify(payload, null, 2));
+
+  console.log("📞 Webhook received:", JSON.stringify(enriched, null, 2));
   res.status(200).json({ success: true, receivedAt });
 });
 
@@ -36,11 +45,13 @@ app.post("/webhook", async (req, res) => {
 app.get("/api/agents", async (req, res) => {
   try {
     const r = await fetch(`${HUNAR_BASE_URL}/agents/`, {
-      headers: { "X-API-Key": HUNAR_API_KEY }
+      headers: { "X-API-Key": HUNAR_API_KEY, "Content-Type": "application/json" }
     });
     const data = await r.json();
+    console.log("Hunar agents response:", JSON.stringify(data));
     res.json(data);
   } catch (err) {
+    console.error("Error fetching agents:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -59,9 +70,9 @@ app.post("/api/campaigns", upload.single("file"), async (req, res) => {
       remove_invalid_rows: true,
       remove_duplicate_phone_numbers: true,
       callback_config: {
-        call_result_callback_url:   N8N_WEBHOOK_URL,
-        call_summary_callback_url:  N8N_WEBHOOK_URL,
-        call_status_callback_url:   N8N_WEBHOOK_URL
+        call_result_callback_url:  N8N_WEBHOOK_URL,
+        call_summary_callback_url: N8N_WEBHOOK_URL,
+        call_status_callback_url:  N8N_WEBHOOK_URL
       }
     };
 
@@ -94,7 +105,11 @@ app.post("/api/campaigns", upload.single("file"), async (req, res) => {
 // ─────────────────────────────────────────
 // GET /health
 // ─────────────────────────────────────────
-app.get("/health", (req, res) => res.json({ status: "ok", calls: callLog.length }));
+app.get("/health", (req, res) => res.json({
+  status: "ok",
+  calls: callLog.length,
+  api_key_set: !!HUNAR_API_KEY
+}));
 
 // ─────────────────────────────────────────
 // GET /  ← Full Dashboard UI
@@ -102,51 +117,70 @@ app.get("/health", (req, res) => res.json({ status: "ok", calls: callLog.length 
 app.get("/", (req, res) => {
 
   const total     = callLog.length;
-  const referrals = callLog.filter(c => c.has_referral === "Yes" || (c.result && c.result.interested === "Yes")).length;
+  const referrals = callLog.filter(c => c.has_referral === "Yes").length;
   const waSent    = callLog.filter(c =>
-    c.call_outcome === "REFERRAL_CAPTURED" || c.next_action_type === "SEND_WHATSAPP_MESSAGE"
+    c.next_action_type === "SEND_WHATSAPP_MESSAGE" && c.whatsapp_consent === "Yes"
   ).length;
   const callbacks = callLog.filter(c => c.callback_requested === "Yes").length;
 
   function outcomeBadge(outcome) {
     const map = {
-      REFERRAL_CAPTURED:         { bg:"#e6f4d7", color:"#2d6a0a" },
       REFERRAL_WHATSAPP_PENDING: { bg:"#d1fae5", color:"#065f46" },
-      REFERRAL_PARTIAL:          { bg:"#fef9c3", color:"#713f12" },
       NO_REFERRAL:               { bg:"#f3f4f6", color:"#6b7280" },
       CALLER_SELF_INTERESTED:    { bg:"#dbeafe", color:"#1e40af" },
       CALL_NOT_CONNECTED:        { bg:"#fee2e2", color:"#991b1b" },
       CALL_INCOMPLETE:           { bg:"#ffedd5", color:"#9a3412" },
       CALLBACK_REQUESTED:        { bg:"#ede9fe", color:"#5b21b6" },
       COMPLETED:                 { bg:"#e6f4d7", color:"#2d6a0a" },
-      NOT_CONNECTED:             { bg:"#fee2e2", color:"#991b1b" },
     };
     const s = map[outcome] || { bg:"#f3f4f6", color:"#6b7280" };
     return `<span style="background:${s.bg};color:${s.color};padding:3px 10px;border-radius:99px;font-size:11px;font-weight:500">${outcome || "UNKNOWN"}</span>`;
   }
 
   function waStatus(c) {
-    const outcome = c.call_outcome || c.status || "";
-    const next    = c.next_action_type || "";
-    if (outcome === "REFERRAL_CAPTURED" || next === "SEND_WHATSAPP_MESSAGE")
-      return `<span style="color:#16a34a;font-weight:500;font-size:13px">✓ Message sent on WhatsApp</span>`;
-    if (outcome === "REFERRAL_WHATSAPP_PENDING")
-      return `<span style="color:#d97706;font-weight:500;font-size:13px">⏳ WhatsApp pending</span>`;
+    const consent = c.whatsapp_consent || "";
+    const next    = c.next_action_type  || "";
+    if (next === "SEND_WHATSAPP_MESSAGE" && consent === "Yes")
+      return `<span style="color:#16a34a;font-weight:500;font-size:13px">✓ Message sent on WhatsApp<br><span style="font-size:11px;font-weight:400">${c.whatsapp_target || ""}</span></span>`;
+    if (next === "SEND_WHATSAPP_MESSAGE" && consent !== "Yes")
+      return `<span style="color:#d97706;font-weight:500;font-size:13px">⏳ Pending consent</span>`;
     return `<span style="color:#9ca3af;font-size:13px">— Not sent</span>`;
+  }
+
+  function scoreColor(s) {
+    const n = parseInt(s);
+    if (n >= 8) return "#16a34a";
+    if (n >= 5) return "#d97706";
+    return "#dc2626";
   }
 
   const rows = callLog.map(c => `
     <tr>
-      <td style="font-weight:500">${c.caller_name || c.callee_name || "—"}
-        <br><span style="font-size:11px;color:#888">${c.call_date || c.created_at || "—"} · ${c.call_duration || c.duration_minutes || "—"}</span>
+      <td style="font-weight:500">
+        ${c.caller_name || c.callee_name || "—"}
+        <br><span style="font-size:11px;color:#888">${c.receivedAt ? new Date(c.receivedAt).toLocaleTimeString("en-IN") : "—"}</span>
       </td>
-      <td>${outcomeBadge(c.call_outcome || c.status)}</td>
-      <td>${c.referral_name && c.referral_name !== "NOT_CAPTURED"
-        ? `<b>${c.referral_name}</b><br><span style="font-size:12px;color:#555">${c.referral_contact || ""}</span>`
-        : (c.result ? JSON.stringify(c.result) : "—")}</td>
-      <td style="text-align:center;font-size:20px;font-weight:600;color:${parseInt(c.overall_score)>=8?"#16a34a":parseInt(c.overall_score)>=5?"#d97706":"#dc2626"}">${c.overall_score || "—"}</td>
+      <td>
+        ${outcomeBadge(c.call_outcome || c.status)}
+        <br><span style="font-size:11px;color:#888;margin-top:4px;display:block">${c.outcome_reason || ""}</span>
+      </td>
+      <td style="font-size:12px;color:#444">
+        ${c.next_action_detail || "—"}
+        ${c.caller_interested_in_role === "Yes"
+          ? `<br><span style="font-size:11px;color:#7c3aed;margin-top:2px;display:block">★ Caller interested in role</span>` : ""}
+        ${c.callback_requested === "Yes"
+          ? `<br><span style="font-size:11px;color:#5b21b6">📅 Callback: ${c.callback_requested_time || "time not captured"}</span>` : ""}
+      </td>
+      <td style="text-align:center">
+        <span style="font-size:22px;font-weight:600;color:${scoreColor(c.overall_score)}">${c.overall_score || "—"}</span>
+        <span style="font-size:10px;color:#aaa">/10</span>
+      </td>
       <td>${waStatus(c)}</td>
-      <td style="font-size:12px;color:#444;max-width:160px">${c.call_summary || c.summary || "—"}</td>
+      <td style="font-size:12px;color:#444;max-width:160px;line-height:1.5">
+        ${c.call_summary || "—"}
+        ${c.quality_flags && c.quality_flags !== "NO FLAGS RAISED"
+          ? `<br><span style="font-size:11px;color:#dc2626;margin-top:4px;display:block">⚠ ${c.quality_flags}</span>` : ""}
+      </td>
     </tr>
   `).join("");
 
@@ -158,9 +192,9 @@ app.get("/", (req, res) => {
   <style>
     *{box-sizing:border-box}
     body{font-family:-apple-system,sans-serif;margin:0;background:#f4f4f5;color:#111}
-    .nav{background:#fff;border-bottom:1px solid #e5e7eb;padding:0 24px;display:flex;align-items:center;gap:0}
-    .nav-brand{font-weight:600;font-size:15px;margin-right:32px;padding:16px 0;color:#111}
-    .nav-tab{padding:16px 16px;font-size:14px;cursor:pointer;border-bottom:2px solid transparent;color:#6b7280;text-decoration:none}
+    .nav{background:#fff;border-bottom:1px solid #e5e7eb;padding:0 24px;display:flex;align-items:center}
+    .nav-brand{font-weight:600;font-size:15px;margin-right:32px;padding:16px 0}
+    .nav-tab{padding:16px 16px;font-size:14px;cursor:pointer;border-bottom:2px solid transparent;color:#6b7280;text-decoration:none;display:inline-block}
     .nav-tab.active{border-bottom-color:#111;color:#111;font-weight:500}
     .page{display:none;padding:24px;max-width:1200px;margin:0 auto}
     .page.active{display:block}
@@ -186,8 +220,7 @@ app.get("/", (req, res) => {
     .btn{background:#111;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer}
     .btn:hover{background:#333}
     .btn:disabled{background:#9ca3af;cursor:not-allowed}
-    .btn-outline{background:#fff;color:#111;border:1px solid #d1d5db;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;margin-right:8px}
-    .upload-area{border:2px dashed #d1d5db;border-radius:8px;padding:32px;text-align:center;cursor:pointer;color:#6b7280;font-size:14px;transition:border-color .2s}
+    .upload-area{border:2px dashed #d1d5db;border-radius:8px;padding:32px;text-align:center;cursor:pointer;color:#6b7280;font-size:14px}
     .upload-area:hover{border-color:#6366f1;color:#6366f1}
     .upload-area.has-file{border-color:#16a34a;background:#f0fdf4;color:#16a34a}
     .alert{padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:16px}
@@ -211,7 +244,7 @@ app.get("/", (req, res) => {
   <p class="sub"><span class="dot"></span>Auto-refreshes every 10 seconds</p>
 
   <div class="webhook-box">
-    Webhook (n8n receives directly from Hunar): <strong>${N8N_WEBHOOK_URL}</strong>
+    n8n receives directly from Hunar at: <strong>${N8N_WEBHOOK_URL}</strong>
   </div>
 
   <div class="metrics">
@@ -224,8 +257,12 @@ app.get("/", (req, res) => {
   <table>
     <thead>
       <tr>
-        <th>Caller</th><th>Outcome</th><th>Referral details</th>
-        <th>Score</th><th>WhatsApp</th><th>Summary</th>
+        <th>Caller</th>
+        <th>Outcome</th>
+        <th>Next action</th>
+        <th>Score</th>
+        <th>WhatsApp</th>
+        <th>Summary & flags</th>
       </tr>
     </thead>
     <tbody>${rows || `<tr><td colspan="6" class="empty">Waiting for first call from Hunar…</td></tr>`}</tbody>
@@ -235,7 +272,7 @@ app.get("/", (req, res) => {
 <!-- ── CREATE CAMPAIGN PAGE ── -->
 <div id="campaign" class="page">
   <h2 style="margin-top:8px">Create Campaign</h2>
-  <p class="sub">Upload your CSV and launch a campaign directly from here — no need to go to voice.hunar.ai</p>
+  <p class="sub">Upload your CSV and launch a campaign — n8n webhook is attached automatically</p>
 
   <div class="card">
     <div id="alertBox"></div>
@@ -254,7 +291,7 @@ app.get("/", (req, res) => {
 
     <div class="form-group">
       <label>Description (optional)</label>
-      <input type="text" id="campDesc" placeholder="Brief description of this campaign" />
+      <input type="text" id="campDesc" placeholder="Brief description" />
     </div>
 
     <div class="form-group">
@@ -267,12 +304,12 @@ app.get("/", (req, res) => {
     </div>
 
     <div style="font-size:12px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:20px">
-      ✅ This campaign will automatically send call results to:<br>
+      ✅ Call results will go directly to n8n:<br>
       <strong style="font-family:monospace">${N8N_WEBHOOK_URL}</strong><br>
-      n8n will then trigger WhatsApp messages for referrals via WATI.
+      WhatsApp messages will be sent to the caller's number when has_referral = Yes & whatsapp_consent = Yes
     </div>
 
-    <div style="display:flex;align-items:center;gap:8px">
+    <div style="display:flex;align-items:center;gap:12px">
       <button class="btn" id="createBtn" onclick="createCampaign()">Launch Campaign</button>
       <span id="loadingText" style="font-size:13px;color:#6b7280;display:none">Creating campaign…</span>
     </div>
@@ -280,7 +317,6 @@ app.get("/", (req, res) => {
 </div>
 
 <script>
-  // ── Page navigation
   function showPage(id, el) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -289,36 +325,34 @@ app.get("/", (req, res) => {
     if (id === 'campaign') loadAgents();
   }
 
-  // ── Load agents from Hunar
   async function loadAgents() {
     const sel = document.getElementById('agentSelect');
     sel.innerHTML = '<option value="">Loading…</option>';
     try {
       const res  = await fetch('/api/agents');
       const data = await res.json();
+      console.log('Agents data:', data);
       if (data.results && data.results.length > 0) {
         sel.innerHTML = '<option value="">Select an agent</option>' +
           data.results.map(a =>
-            \`<option value="\${a.id}">\${a.name} (\${a.language})</option>\`
+            \`<option value="\${a.id}">\${a.name} — \${a.language}</option>\`
           ).join('');
       } else {
-        sel.innerHTML = '<option value="">No agents found</option>';
+        sel.innerHTML = '<option value="">No agents found — check API key</option>';
       }
     } catch(e) {
+      console.error('Agent load error:', e);
       sel.innerHTML = '<option value="">Error loading agents</option>';
     }
   }
 
-  // ── Handle CSV file selection
   function handleFile(input) {
     const file = input.files[0];
     if (!file) return;
-    const area = document.getElementById('uploadArea');
-    area.classList.add('has-file');
+    document.getElementById('uploadArea').classList.add('has-file');
     document.getElementById('uploadText').textContent = '✓ ' + file.name;
   }
 
-  // ── Create campaign
   async function createCampaign() {
     const name    = document.getElementById('campName').value.trim();
     const agentId = document.getElementById('agentSelect').value;
@@ -329,9 +363,9 @@ app.get("/", (req, res) => {
     if (!agentId) return showAlert('Please select an agent', 'error');
     if (!file)    return showAlert('Please upload a CSV file', 'error');
 
-    const btn = document.getElementById('createBtn');
+    const btn     = document.getElementById('createBtn');
     const loading = document.getElementById('loadingText');
-    btn.disabled = true;
+    btn.disabled  = true;
     loading.style.display = 'inline';
 
     try {
@@ -343,13 +377,12 @@ app.get("/", (req, res) => {
       const result = await res.json();
 
       if (result.success) {
-        showAlert('🎉 Campaign created! Calls will start shortly. Results will flow to n8n automatically.', 'success');
+        showAlert('🎉 Campaign launched! Calls starting shortly. Results will flow to n8n automatically.', 'success');
         document.getElementById('campName').value = '';
         document.getElementById('campDesc').value = '';
         document.getElementById('csvFile').value  = '';
         document.getElementById('uploadArea').classList.remove('has-file');
         document.getElementById('uploadText').textContent = 'Click to upload CSV file';
-        document.getElementById('agentSelect').value = '';
       } else {
         showAlert('Error: ' + JSON.stringify(result.error), 'error');
       }
@@ -364,11 +397,10 @@ app.get("/", (req, res) => {
   function showAlert(msg, type) {
     const box = document.getElementById('alertBox');
     box.innerHTML = \`<div class="alert alert-\${type}">\${msg}</div>\`;
-    setTimeout(() => box.innerHTML = '', 6000);
+    setTimeout(() => box.innerHTML = '', 8000);
   }
 
-  // Auto-refresh dashboard
-  if (window.location.hash !== '#campaign') {
+  if (!window.location.hash || window.location.hash === '#dashboard') {
     setTimeout(() => location.reload(), 10000);
   }
 </script>
@@ -377,4 +409,4 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Running on port ${PORT} | API key set: ${!!HUNAR_API_KEY}`));
