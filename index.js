@@ -69,6 +69,10 @@ app.post("/api/campaigns", upload.single("file"), async (req, res) => {
       description: description || "",
       remove_invalid_rows: true,
       remove_duplicate_phone_numbers: true,
+      column_mapping: {
+        callee_name:   "callee_name",
+        mobile_number: "mobile_number"
+      },
       callback_config: {
         call_result_callback_url:  N8N_WEBHOOK_URL,
         call_summary_callback_url: N8N_WEBHOOK_URL,
