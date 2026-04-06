@@ -24,19 +24,60 @@ app.post("/webhook", async (req, res) => {
   const payload    = req.body;
   const receivedAt = new Date().toISOString();
 
-  // Attach the caller's number so n8n can send WhatsApp
-  // Hunar sends it as "to_number" in the webhook payload
+  const whatsapp_target = payload.to_number || payload.mobile_number || "NOT_CAPTURED";
+
   const enriched = {
     ...payload,
     receivedAt,
-    whatsapp_target: payload.to_number || payload.mobile_number || "NOT_CAPTURED"
+    whatsapp_target,
+    whatsapp_status: "NOT_SENT"
   };
+
+  // ── Send WhatsApp via WATI directly if referral + consent ──
+  const shouldSendWA = (
+    payload.has_referral === "Yes" &&
+    payload.whatsapp_consent === "Yes" &&
+    payload.next_action_type === "SEND_WHATSAPP_MESSAGE" &&
+    whatsapp_target !== "NOT_CAPTURED"
+  );
+
+  if (shouldSendWA) {
+    try {
+      const WATI_URL   = process.env.WATI_API_URL;
+      const WATI_TOKEN = process.env.WATI_ACCESS_TOKEN;
+      const TEMPLATE   = process.env.WATI_TEMPLATE_NAME || "share_referrals";
+
+      const waRes = await fetch(`${WATI_URL}/api/v1/sendTemplateMessage`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": WATI_TOKEN
+        },
+        body: JSON.stringify({
+          whatsappNumber: whatsapp_target,
+          template_name:  TEMPLATE,
+          broadcast_name: "hunar_referral"
+        })
+      });
+
+      const waData = await waRes.json();
+      console.log("📲 WATI response:", JSON.stringify(waData));
+
+      enriched.whatsapp_status = waRes.ok ? "SENT" : "FAILED";
+      enriched.whatsapp_response = waData;
+
+    } catch (err) {
+      console.error("❌ WATI error:", err.message);
+      enriched.whatsapp_status = "FAILED";
+      enriched.whatsapp_error  = err.message;
+    }
+  }
 
   callLog.unshift(enriched);
   if (callLog.length > 100) callLog.pop();
 
   console.log("📞 Webhook received:", JSON.stringify(enriched, null, 2));
-  res.status(200).json({ success: true, receivedAt });
+  res.status(200).json({ success: true, receivedAt, whatsapp_status: enriched.whatsapp_status });
 });
 
 // ─────────────────────────────────────────
