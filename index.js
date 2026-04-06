@@ -52,14 +52,13 @@ app.post("/webhook", async (req, res) => {
       const WATI_TOKEN = process.env.WATI_ACCESS_TOKEN;
       const TEMPLATE   = process.env.WATI_TEMPLATE_NAME || "share_referrals";
 
-      const waRes = await fetch(`${WATI_URL}/api/v1/sendTemplateMessage`, {
+      const waRes = await fetch(`${WATI_URL}/api/v1/sendTemplateMessage?whatsappNumber=${whatsapp_target}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": WATI_TOKEN
         },
         body: JSON.stringify({
-          whatsappNumber: whatsapp_target,
           template_name:  TEMPLATE,
           broadcast_name: "hunar_referral"
         })
