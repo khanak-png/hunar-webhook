@@ -24,7 +24,12 @@ app.post("/webhook", async (req, res) => {
   const payload    = req.body;
   const receivedAt = new Date().toISOString();
 
-  const whatsapp_target = payload.to_number || payload.mobile_number || "NOT_CAPTURED";
+  // Clean the number — remove +, spaces, dashes and ensure country code
+  let raw_number = payload.to_number || payload.mobile_number || "";
+  raw_number = raw_number.toString().replace(/[^0-9]/g, ""); // remove non-digits
+  if (raw_number.length === 10) raw_number = "91" + raw_number; // add India code
+  const whatsapp_target = raw_number || "NOT_CAPTURED";
+  console.log("📱 WhatsApp target number:", whatsapp_target);
 
   const enriched = {
     ...payload,
