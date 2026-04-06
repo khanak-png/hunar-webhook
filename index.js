@@ -60,7 +60,13 @@ app.post("/webhook", async (req, res) => {
         },
         body: JSON.stringify({
           template_name:  TEMPLATE,
-          broadcast_name: "hunar_referral"
+          broadcast_name: "hunar_referral",
+          parameters: [
+            {
+              name: "1",
+              value: payload.caller_name || "Friend"
+            }
+          ]
         })
       });
 
