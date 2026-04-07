@@ -12,7 +12,7 @@ app.use(express.json());
 // ─────────────────────────────────────────
 const HUNAR_API_KEY   = process.env.HUNAR_API_KEY || "";
 const HUNAR_BASE_URL  = "https://api.voice.hunar.ai/external/v1";
-const N8N_WEBHOOK_URL = "https://khanakarodia.app.n8n.cloud/webhook/BPO_API";
+const WEBHOOK_URL = "https://hunar-webhook.onrender.com/webhook";
 
 // In-memory call log (last 100)
 const callLog = [];
@@ -125,9 +125,9 @@ app.post("/api/campaigns", upload.single("file"), async (req, res) => {
         mobile_number: "mobile_number"
       },
       callback_config: {
-        call_result_callback_url:  N8N_WEBHOOK_URL,
-        call_summary_callback_url: N8N_WEBHOOK_URL,
-        call_status_callback_url:  N8N_WEBHOOK_URL
+        call_result_callback_url:  WEBHOOK_URL,
+        call_summary_callback_url: WEBHOOK_URL,
+        call_status_callback_url:  WEBHOOK_URL
       }
     };
 
@@ -299,7 +299,7 @@ app.get("/", (req, res) => {
   <p class="sub"><span class="dot"></span>Auto-refreshes every 10 seconds</p>
 
   <div class="webhook-box">
-    n8n receives directly from Hunar at: <strong>${N8N_WEBHOOK_URL}</strong>
+    Hunar sends call results directly to: <strong>${WEBHOOK_URL}</strong>
   </div>
 
   <div class="metrics">
@@ -360,7 +360,7 @@ app.get("/", (req, res) => {
 
     <div style="font-size:12px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:20px">
       ✅ Call results will go directly to n8n:<br>
-      <strong style="font-family:monospace">${N8N_WEBHOOK_URL}</strong><br>
+      <strong style="font-family:monospace">${WEBHOOK_URL}</strong><br>
       WhatsApp messages will be sent to the caller's number when has_referral = Yes & whatsapp_consent = Yes
     </div>
 
